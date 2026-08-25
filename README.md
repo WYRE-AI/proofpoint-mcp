@@ -7,12 +7,12 @@ A Model Context Protocol (MCP) server for Proofpoint TAP and Essentials APIs. En
 
 This is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that connects Claude (or any MCP-compatible AI) to your Proofpoint environment.
 
-> **Part of the [MSP Claude Plugins](https://github.com/wyre-technology) ecosystem** — a growing suite of AI integrations for the MSP stack. Built by MSPs, for MSPs.
+> **Part of the [MSP Claude Plugins](https://github.com/WYRE-AI) ecosystem** — a growing suite of AI integrations for the MSP stack. Built by MSPs, for MSPs.
 
 ## Installation
 
 ```bash
-npm install @wyre-technology/proofpoint-mcp
+npm install @wyre-ai/proofpoint-mcp
 ```
 
 ## Configuration
@@ -37,7 +37,7 @@ Add to your Claude Desktop `claude_desktop_config.json`:
   "mcpServers": {
     "proofpoint-mcp": {
       "command": "npx",
-      "args": ["@wyre-technology/proofpoint-mcp"],
+      "args": ["@wyre-ai/proofpoint-mcp"],
       "env": {
         "PROOFPOINT_SERVICE_PRINCIPAL": "your-proofpoint-service-principal"
         "PROOFPOINT_SERVICE_SECRET": "your-proofpoint-service-secret"
@@ -53,7 +53,7 @@ Add to your Claude Desktop `claude_desktop_config.json`:
 claude mcp add proofpoint-mcp \
   -e PROOFPOINT_SERVICE_PRINCIPAL=your-value \
   -e PROOFPOINT_SERVICE_SECRET=your-value \
-  -- npx -y @wyre-technology/proofpoint-mcp
+  -- npx -y @wyre-ai/proofpoint-mcp
 ```
 
 ### Docker
@@ -119,7 +119,7 @@ URL rewriting and click defense
 
 ```bash
 # Clone the repository
-git clone https://github.com/wyre-technology/proofpoint-mcp.git
+git clone https://github.com/WYRE-AI/proofpoint-mcp.git
 cd proofpoint-mcp
 
 # Install dependencies
