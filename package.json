@@ -1,5 +1,5 @@
 {
-  "name": "@wyre-technology/proofpoint-mcp",
+  "name": "@wyre-ai/proofpoint-mcp",
   "version": "1.0.1",
   "description": "MCP server for Proofpoint Email Protection - email security, threat intelligence, TAP (Targeted Attack Protection), and email filtering API integration",
   "type": "module",
@@ -23,7 +23,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wyre-technology/proofpoint-mcp.git"
+    "url": "git+https://github.com/WYRE-AI/proofpoint-mcp.git"
   },
   "keywords": [
     "mcp",
@@ -40,9 +40,9 @@
   "author": "Wyre Technology",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/wyre-technology/proofpoint-mcp/issues"
+    "url": "https://github.com/WYRE-AI/proofpoint-mcp/issues"
   },
-  "homepage": "https://github.com/wyre-technology/proofpoint-mcp#readme",
+  "homepage": "https://github.com/WYRE-AI/proofpoint-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"
   },

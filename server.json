@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.wyre-technology/proofpoint-mcp",
+  "name": "io.github.WYRE-AI/proofpoint-mcp",
   "title": "Proofpoint",
   "description": "MCP server for Proofpoint TAP — threat intelligence, forensics, quarantine, and email security.",
   "repository": {
-    "url": "https://github.com/wyre-technology/proofpoint-mcp",
+    "url": "https://github.com/WYRE-AI/proofpoint-mcp",
     "source": "github"
   },
   "version": "0.0.0",
-  "websiteUrl": "https://github.com/wyre-technology/proofpoint-mcp",
+  "websiteUrl": "https://github.com/WYRE-AI/proofpoint-mcp",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/wyre-technology/proofpoint-mcp:0.0.0",
+      "identifier": "ghcr.io/wyre-ai/proofpoint-mcp:0.0.0",
       "transport": {
         "type": "stdio"
       },
