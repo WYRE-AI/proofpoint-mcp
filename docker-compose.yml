@@ -1,0 +1,24 @@
+services:
+  # Gateway mode. Service principal and secret arrive per request on
+  # X-Proofpoint-Service-Principal and X-Proofpoint-Service-Secret.
+  # Do not set PROOFPOINT_SERVICE_PRINCIPAL, PROOFPOINT_SERVICE_SECRET, or
+  # env_file here — that would put static vendor credentials in the container.
+  # The project .env is used only for Compose interpolation of
+  # CONDUIT_S2S_SECRET. For AUTH_MODE=env, pass the Proofpoint variables on
+  # that process instead (see the README).
+  proofpoint-mcp:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_HTTP_PORT=8080
+      - MCP_HTTP_HOST=0.0.0.0
+      - AUTH_MODE=gateway
+      - CONDUIT_S2S_SECRET=${CONDUIT_S2S_SECRET:?set CONDUIT_S2S_SECRET}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
