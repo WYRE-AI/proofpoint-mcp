@@ -17,6 +17,10 @@ USER appuser
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+# 0.0.0.0 is the in-container bind. Startup still refuses to listen without a
+# real CONDUIT_S2S_SECRET (empty and known placeholders are rejected).
+# MCP_ALLOW_INSECURE_DEV=1 ignores this host and binds 127.0.0.1 only.
+# AUTH_MODE=gateway never falls back to image env credentials.
 ENV NODE_ENV=production MCP_TRANSPORT=http MCP_HTTP_PORT=8080 MCP_HTTP_HOST=0.0.0.0 LOG_LEVEL=info AUTH_MODE=gateway
 CMD ["node", "dist/index.js"]
 

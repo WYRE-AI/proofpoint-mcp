@@ -22,11 +22,20 @@
  * Auth modes:
  * - env (default): Credentials from PROOFPOINT_SERVICE_PRINCIPAL and
  *   PROOFPOINT_SERVICE_SECRET environment variables
- * - gateway: Credentials injected from request headers by the MCP gateway
+ * - gateway: Credentials injected from request headers by the MCP gateway.
+ *   Gateway mode never falls back to PROOFPOINT_* env credentials.
  *   - Header: X-Proofpoint-Service-Principal
  *   - Header: X-Proofpoint-Service-Secret
  *   - Header: X-Proofpoint-Cluster-Url (optional — per-tenant API host;
  *     falls back to PROOFPOINT_BASE_URL / the enterprise TAP default)
+ *
+ * HTTP transport refuses to start unless CONDUIT_S2S_SECRET is set to a
+ * real value. Known placeholders are rejected. MCP_ALLOW_INSECURE_DEV=1 is
+ * a local-only escape hatch for an empty secret: it logs a warning, does
+ * not enforce X-Gateway-S2S, and listens on 127.0.0.1 only. A configured
+ * secret honors MCP_HTTP_HOST (default 127.0.0.1 when unset). /health and
+ * /healthz stay unauthenticated and do not read credentials. stdio does
+ * not use S2S auth.
  *
  * Domains:
  * - tap: Targeted Attack Protection (SIEM API) - threats, clicks, messages
@@ -42,7 +51,12 @@
  * - reports: Organization-level security reports
  */
 
-import { createServer as createHttpServer, IncomingMessage, ServerResponse } from "node:http";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -63,7 +77,95 @@ import {
   routeIntent,
 } from "./utils/categories.js";
 import { verifyS2sHeader, S2S_HEADER } from "./s2s-verify.js";
-const S2S_SECRET = process.env.CONDUIT_S2S_SECRET || "";
+
+/**
+ * Public example values. A copied placeholder must not verify as a real secret.
+ * Matched after trim + lowercase, so "Change-Me" is the same as "change-me".
+ */
+const KNOWN_PLACEHOLDER_SECRETS = new Set([
+  "replace-with-a-real-secret",
+  "your-s2s-secret",
+  "your-secret",
+  "changeme",
+  "change-me",
+  "placeholder",
+  "secret",
+  "example",
+  "replace-me",
+  "s2s-secret",
+]);
+
+const LOOPBACK_HOST = "127.0.0.1";
+
+const MISSING_S2S_SECRET_ERROR =
+  "Refusing to start HTTP transport: CONDUIT_S2S_SECRET is empty. " +
+  "Set CONDUIT_S2S_SECRET to the gateway-provisioned secret (openssl rand -hex 32), " +
+  "or set MCP_ALLOW_INSECURE_DEV=1 for local development only.";
+
+const PLACEHOLDER_S2S_SECRET_ERROR =
+  "Refusing to start HTTP transport: CONDUIT_S2S_SECRET is a known placeholder. " +
+  "Generate a secret with `openssl rand -hex 32` and set CONDUIT_S2S_SECRET to that value.";
+
+const INSECURE_DEV_WARNING =
+  "SECURITY WARNING: CONDUIT_S2S_SECRET is empty and MCP_ALLOW_INSECURE_DEV=1. " +
+  "HTTP /mcp is starting with service-to-service authentication DISABLED, bound to 127.0.0.1 only. " +
+  "Local development only; do not expose this port.";
+
+function refuseStart(message: string): never {
+  logger.error(message);
+  process.exit(1);
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/** 127.0.0.1, the rest of 127.0.0.0/8, localhost, and ::1. */
+function isLoopbackBindHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[(.+)\]$/, "$1");
+  if (normalized === "localhost" || normalized === "::1") return true;
+  const bare = normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
+  const parts = bare.split(".");
+  if (parts.length !== 4) return false;
+  if (parts.some((part) => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return false;
+  return parts[0] === "127";
+}
+
+/**
+ * Fail closed. A known placeholder is never a configured secret, including
+ * when MCP_ALLOW_INSECURE_DEV=1 is also set. Empty is the only case the dev
+ * flag may bypass, and that bypass does not check X-Gateway-S2S.
+ * The secret value is never written to logs.
+ */
+function resolveS2sSecret(env: NodeJS.ProcessEnv = process.env): { secret: string; insecureDev: boolean } {
+  const raw = (env.CONDUIT_S2S_SECRET ?? "").trim();
+  if (raw && KNOWN_PLACEHOLDER_SECRETS.has(raw.toLowerCase())) {
+    refuseStart(PLACEHOLDER_S2S_SECRET_ERROR);
+  }
+  if (raw) return { secret: raw, insecureDev: false };
+  if (env.MCP_ALLOW_INSECURE_DEV === "1") {
+    return { secret: "", insecureDev: true };
+  }
+  refuseStart(MISSING_S2S_SECRET_ERROR);
+}
+
+/**
+ * No real secret: force 127.0.0.1, even when MCP_HTTP_HOST is a wider address
+ * such as 0.0.0.0. A real secret honors MCP_HTTP_HOST. When that variable is
+ * unset the bind is 127.0.0.1; the container image sets 0.0.0.0 explicitly.
+ */
+function resolveBindHost(s2sSecret: string, env: NodeJS.ProcessEnv = process.env): string {
+  const configured = (env.MCP_HTTP_HOST ?? "").trim();
+  if (s2sSecret) return configured || LOOPBACK_HOST;
+  if (configured && !isLoopbackBindHost(configured)) {
+    logger.error(
+      `WARNING: MCP_HTTP_HOST=${configured} is not a loopback address. ` +
+        "MCP_ALLOW_INSECURE_DEV=1 without CONDUIT_S2S_SECRET cannot listen there. " +
+        `Binding ${LOOPBACK_HOST} only.`,
+    );
+  }
+  return LOOPBACK_HOST;
+}
 
 // Lazy-loading mode flag
 const LAZY_LOADING = process.env.LAZY_LOADING === "true";
@@ -599,13 +701,21 @@ async function startStdioTransport(): Promise<void> {
 
 /**
  * Start the server with HTTP Streamable transport.
- * In gateway mode (AUTH_MODE=gateway), credentials are extracted
+ *
+ * Refuses to listen unless CONDUIT_S2S_SECRET is a real secret. The insecure
+ * dev bypass forces 127.0.0.1. In gateway mode, credentials are extracted
  * from the X-Proofpoint-Service-Principal and X-Proofpoint-Service-Secret
- * request headers.
+ * request headers and a request missing either header is rejected. There is
+ * no fallback to PROOFPOINT_* environment variables in that mode.
  */
-async function startHttpTransport(): Promise<void> {
+export async function startHttpTransport(): Promise<HttpServer> {
+  const { secret: s2sSecret, insecureDev } = resolveS2sSecret();
   const port = parseInt(process.env.MCP_HTTP_PORT || "8080", 10);
-  const host = process.env.MCP_HTTP_HOST || "0.0.0.0";
+  const host = resolveBindHost(s2sSecret);
+  if (insecureDev) {
+    // error level so LOG_LEVEL=warn|error cannot hide the bypass.
+    logger.error(INSECURE_DEV_WARNING);
+  }
   const isGatewayMode = process.env.AUTH_MODE === "gateway";
 
   const httpServer = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
@@ -624,7 +734,10 @@ async function startHttpTransport(): Promise<void> {
 
     // MCP endpoint - each request gets a fresh, stateless Server + Transport.
     if (url.pathname === "/mcp") {
-      if (S2S_SECRET && !verifyS2sHeader(req.headers[S2S_HEADER] as string | undefined, S2S_SECRET)) {
+      // Empty s2sSecret is only reachable when MCP_ALLOW_INSECURE_DEV=1;
+      // startup refuses otherwise. A configured secret is always enforced,
+      // before any vendor credential is read.
+      if (s2sSecret && !verifyS2sHeader(headerValue(req.headers[S2S_HEADER]), s2sSecret)) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
@@ -634,10 +747,12 @@ async function startHttpTransport(): Promise<void> {
         return;
       }
 
-      // Gateway mode: extract credentials from headers
+      // Gateway mode: credentials must arrive on every request. Reject
+      // explicitly if missing rather than falling through — falling through
+      // would resolve credentials from the process environment.
       if (isGatewayMode) {
-        const { credentials, error } = resolveGatewayCredentials(
-          (name) => req.headers[name] as string | undefined
+        const { credentials, error } = resolveGatewayCredentials((name) =>
+          headerValue(req.headers[name])
         );
 
         if (!credentials) {
@@ -667,8 +782,11 @@ async function startHttpTransport(): Promise<void> {
     res.end(JSON.stringify({ error: "Not found", endpoints: ["/mcp", "/health"] }));
   });
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => reject(err);
+    httpServer.once("error", onError);
     httpServer.listen(port, host, () => {
+      httpServer.off("error", onError);
       logger.info(`Proofpoint MCP server listening on http://${host}:${port}/mcp`);
       logger.info(`Health check available at http://${host}:${port}/health`);
       logger.info(
@@ -678,17 +796,7 @@ async function startHttpTransport(): Promise<void> {
     });
   });
 
-  // Graceful shutdown
-  const shutdown = async () => {
-    logger.info("Shutting down Proofpoint MCP server...");
-    await new Promise<void>((resolve, reject) => {
-      httpServer.close((err) => (err ? reject(err) : resolve()));
-    });
-    process.exit(0);
-  };
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  return httpServer;
 }
 
 /**
@@ -704,16 +812,29 @@ async function main() {
   });
 
   if (transportType === "http") {
-    await startHttpTransport();
+    const httpServer = await startHttpTransport();
+    const shutdown = async () => {
+      logger.info("Shutting down Proofpoint MCP server...");
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => (err ? reject(err) : resolve()));
+      });
+      process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   } else {
     await startStdioTransport();
   }
 }
 
-main().catch((error) => {
-  logger.error("Fatal startup error", {
-    error: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : undefined,
+// Vitest imports this module to call startHttpTransport. Skip the CLI
+// entrypoint there. `node dist/index.js` still starts stdio or HTTP.
+if (process.env.VITEST !== "true") {
+  main().catch((error) => {
+    logger.error("Fatal startup error", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
+}
