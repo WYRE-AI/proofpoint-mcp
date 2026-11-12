@@ -7,12 +7,15 @@ COPY . .
 RUN npm run build
 
 FROM node:26-alpine AS production
+RUN apk -U upgrade --no-cache
 RUN addgroup -g 1001 -S appuser && adduser -S appuser -u 1001 -G appuser
 WORKDIR /app
 COPY package*.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 RUN npm prune --omit=dev && npm cache clean --force
+# npm is not needed at runtime; removing it clears Trivy CVEs in its bundled deps
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 USER appuser
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
