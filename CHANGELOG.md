@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The HTTP transport no longer exits on a malformed request (WYREAI-741).** The request
+  target was parsed against the client-supplied `Host` header, and a value that does not parse
+  (or a target such as `//`) threw inside the request listener before authentication. The
+  target is now parsed against a fixed base, so `Host` is no longer consulted, and a target
+  that still cannot be parsed gets a `400` JSON response while the server keeps running.
+
 - Gateway mode now reads `X-Proofpoint-Cluster-Url`. `startHttpTransport` extracted `servicePrincipal`/`serviceSecret` from headers but hardcoded `baseUrl` from `PROOFPOINT_BASE_URL` (or the enterprise TAP default), ignoring any cluster URL the gateway sent — so a Proofpoint Essentials tenant or any non-default host silently got routed to the wrong API regardless of what was configured. The header is optional and still falls back to `PROOFPOINT_BASE_URL` / the default host, so single-tenant/env-mode deployments are unaffected. The credential-resolution logic that used to be inlined in the HTTP handler is now `resolveGatewayCredentials()` in `src/utils/client.ts`, covered by `src/__tests__/gateway-credentials.test.ts`.
 
 - Custom base URLs with a path prefix no longer lose that prefix. `apiRequest()` built request URLs with `new URL(path, base)`, which performs RFC 3986 relative resolution rather than concatenation: because every call site passes a path-absolute reference (e.g. `/v2/campaign`), the base's own path was discarded. Proofpoint Essentials tenants require an `/api` prefix on `PROOFPOINT_BASE_URL` (e.g. `https://<tenant>.proofpointessentials.com/api/`), so every request 404'd against `/v2/…` instead of `/api/v2/…`. The base and path are now slash-normalized and joined explicitly. Enterprise TAP (`https://tap-api-v2.proofpoint.com`, no path segment) is unaffected, which is why the bug was invisible by default. Regression tests in `src/__tests__/client-url.test.ts` pin both host shapes. Thanks to @Glitch3dPenguin for the report and fix.
